@@ -21,7 +21,7 @@ Three project-owned skills are loaded into every design, build, review, and repa
 - [Worldcraft](skills/roblox-worldcraft/SKILL.md): authored environments, recognizable landmarks, primitive-based architecture, traversal, readable hazards, and performance.
 - [Economy and growth](skills/roblox-economy-growth/SKILL.md): currencies, retention, offers with clear player value, pricing and receipt requirements, discovery experiments, and defined metrics.
 
-The **Game plan** records audience, hook, retention, proposed offers, their free alternatives and setup requirements, metrics, and launch experiments. It travels with the JSON backup and source ZIP. Paid offers are proposals; the offline export never invents product IDs or activates real purchases. Every build uses 3–5 AI calls and the selected provider's balance.
+The **Game plan** records audience, hook, retention, proposed offers, their free alternatives and setup requirements, metrics, and launch experiments. It travels with the JSON backup and source ZIP. Paid offers are proposals; the offline export never invents product IDs or activates real purchases. Every build uses 3–7 AI calls and the selected provider's balance.
 
 ## Storage and privacy
 
