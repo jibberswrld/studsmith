@@ -145,6 +145,17 @@ try {
   const stacked = result((await alice.generate({ ...gen, currentGame: rejected.game })).final);
   assert.match(stacked.game.notes[0], /balance is empty.*didn't finish on this version/);
   assert.ok(!stacked.game.notes.some((note) => /still found problems|^AI check \(/.test(note)), JSON.stringify(stacked.game.notes));
+  // Closing the connection mid-build stops the pipeline: no further model calls after the stage in flight.
+  await mode("ok", 1500);
+  const callsAtStart = (await mockState()).calls.length;
+  const leaving = new AbortController();
+  const response = await fetch(`${base}/api/generate`, { method: "POST", headers: { "Content-Type": "application/json", Origin: base, Cookie: alice.cookie() }, body: JSON.stringify(gen), signal: leaving.signal });
+  const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
+  for (let seen = ""; !seen.includes('"stage":"build","attempt":1,"status":"started"');) seen += (await reader.read()).value ?? "";
+  leaving.abort();
+  await delay(5000); // design + build + review would have been requested by now if the run kept going
+  assert.deepEqual((await mockState()).calls.slice(callsAtStart).map((call: { stage: string }) => call.stage), ["design", "build"]);
+  await mode("ok");
   // With a short budget the run stops before a repair it couldn't finish, and keeps the reviewed game.
   const tight = start("next", ["start", "-H", "127.0.0.1", "-p", String(tightPort)], { STUDSMITH_GENERATION_BUDGET_MS: "3000", STUDSMITH_APP_ORIGIN: `${base},${tightBase}` });
   await ready(tightBase);
@@ -155,6 +166,11 @@ try {
   await mode("ok", 1100);
   const late = result((await alice.generate(gen, tightBase)).final);
   assert.match(late.draft!.reason, /time limit/);
+  // A structurally broken first build reserves time for the review its repair still needs, so no repair starts.
+  await mode("invalid-build", 700);
+  const broken = await alice.generate(gen, tightBase);
+  assert.match(broken.error!.message, /ran out of time/);
+  assert.deepEqual(await stages(2), ["design", "build"]);
   tight.child.kill("SIGTERM");
   await mode("ok");
   const denied = await fetch(`${base}/api/publik`, { method: "POST", headers: { Origin: "https://untrusted.example", Cookie: alice.cookie(), "Content-Type": "application/json" }, body: JSON.stringify({ action: "settings" }) });

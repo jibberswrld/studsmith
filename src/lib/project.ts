@@ -73,7 +73,8 @@ export const GameSchema = z.object({
 export type Game = z.infer<typeof GameSchema>;
 export type Part = z.infer<typeof PartSchema>;
 export type GameFile = z.infer<typeof FileSchema>;
-export type Revision = { id: string; createdAt: string; prompt: string; summary: string; game: Game };
+/** needsReview marks a saved game that didn't pass the AI check. Older revisions only have the DRAFT_SUMMARY label. */
+export type Revision = { id: string; createdAt: string; prompt: string; summary: string; game: Game; needsReview?: boolean };
 export type Project = { id: string; createdAt: string; updatedAt: string; revisions: Revision[] };
 export type ProjectSummary = { id: string; title: string; description: string; updatedAt: string; revisionCount: number; needsReview: boolean };
 
@@ -93,6 +94,7 @@ export type BuildEvent =
   | { type: "result"; game: Game; draft: Draft | null }
   | { type: "error"; error: { message: string; topUpUrl?: string | null } };
 export const current = (project: Project) => project.revisions[project.revisions.length - 1];
+export const needsReview = (revision: Revision) => revision.needsReview ?? revision.summary === DRAFT_SUMMARY;
 export const exportName = (title: string) => title.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "game";
 
 export const STARTER_PROMPTS = [

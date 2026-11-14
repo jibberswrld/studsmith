@@ -14,6 +14,10 @@ export const POST = handle(async (req: Request) => {
   const config = providerFor(auth, body.tier);
   const encoder = new TextEncoder();
   let open = true;
+  // Stop the remaining AI stages when the visitor goes away. On Vercel, vercel.json also opts this route into
+  // request cancellation (supportsCancellation) so req.signal fires and the function ends on disconnect.
+  const stop = new AbortController();
+  const signal = AbortSignal.any([req.signal, stop.signal]);
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (event: BuildEvent) => {
@@ -21,14 +25,14 @@ export const POST = handle(async (req: Request) => {
         try { controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`)); } catch { open = false; }
       };
       const ping = setInterval(() => send({ type: "ping" }), 15_000);
-      try { send({ type: "result", ...(await generateGame(body.prompt, body.currentGame, config, req.signal, send)) }); }
+      try { send({ type: "result", ...(await generateGame(body.prompt, body.currentGame, config, signal, send)) }); }
       catch (error) { const { message, topUpUrl } = publicError(error); send({ type: "error", error: { message, topUpUrl } }); }
       finally {
         clearInterval(ping);
         if (open) { open = false; try { controller.close(); } catch { /* The visitor already left. */ } }
       }
     },
-    cancel() { open = false; },
+    cancel() { open = false; stop.abort(); },
   });
   return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store, no-transform", "X-Content-Type-Options": "nosniff" } });
 });

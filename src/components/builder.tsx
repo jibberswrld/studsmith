@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listProjects, loadProject, createProject, appendRevision, requestPersistentStorage } from "@/lib/storage";
 import { placeXml, sourceZip } from "@/lib/export";
-import { BUILD_ESTIMATE, BUILD_ESTIMATE_MICROS, current, dollars, DRAFT_SUMMARY, exportName, STARTER_PROMPTS, type BuildEvent, type Game, type GameFile, type Project, type ProjectSummary } from "@/lib/project";
+import { BUILD_ESTIMATE, BUILD_ESTIMATE_MICROS, current, dollars, DRAFT_SUMMARY, exportName, needsReview, STARTER_PROMPTS, type BuildEvent, type Game, type GameFile, type Project, type ProjectSummary } from "@/lib/project";
 import { LegalLinks, Logo, NOT_AFFILIATED } from "./brand";
 import GatePage, { type GateState as Gate } from "./gate";
 
@@ -47,10 +47,13 @@ async function streamBuild(body: unknown, signal: AbortSignal, onStage: (event: 
         let event: BuildEvent;
         try { event = JSON.parse(line); } catch { continue; }
         if (event.type === "stage") onStage(event);
-        else if (event.type === "result" || event.type === "error") final = event;
+        // Stop at the terminal event, so a connection reset after it can't discard the result.
+        else if (event.type === "result" || event.type === "error") { final = event; break; }
       }
+      if (final) break;
     }
-  } catch (e) { if (signal.aborted) throw e; throw CUT_OFF; }
+  } catch (e) { if (final) { /* already have the result */ } else if (signal.aborted) throw e; else throw CUT_OFF; }
+  finally { reader.cancel().catch(() => {}); }
   if (!final) throw CUT_OFF;
   if (final.type === "error") throw final.error;
   return final as BuildResult;
@@ -123,6 +126,14 @@ export default function Builder() {
     const timer = setInterval(() => { if (!document.hidden) void api("/api/publik", post({ action: "telemetry", event: "active_session" })).catch(() => {}); }, 30 * 60 * 1000);
     return () => clearInterval(timer);
   }, [gate?.state, gate?.workspace]);
+  // A Publik user who left to buy a plan (or top up) comes back to a fresh balance, even while Build is blocked.
+  useEffect(() => {
+    if (gate?.state !== "ready" || gate.provider !== "publik") return;
+    const back = () => { if (!document.hidden) void refreshGate(); };
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("focus", back);
+    return () => { document.removeEventListener("visibilitychange", back); window.removeEventListener("focus", back); };
+  }, [gate?.state, gate?.provider, refreshGate]);
   // While a build runs: hold a screen wake lock where supported, and warn before the tab is closed or reloaded.
   useEffect(() => {
     if (!building) return;
@@ -221,7 +232,7 @@ export default function Builder() {
     try {
       const { game: built, draft } = await streamBuild({ currentGame: game || null, prompt, tier }, controller.signal, (stage) => setStages((list) => [...(list || []), stage]));
       const summary = draft ? DRAFT_SUMMARY : project ? "Updated game" : "Created project";
-      const p = project ? await appendRevision(gate!.workspace!, project.id, revision!.id, built, prompt, summary) : await createProject(gate!.workspace!, built, prompt, summary);
+      const p = project ? await appendRevision(gate!.workspace!, project.id, revision!.id, built, prompt, summary, !!draft) : await createProject(gate!.workspace!, built, prompt, summary, !!draft);
       acceptProject(p); setPrompt(""); setTab(draft ? "guide" : "preview");
       // The draft banner explains a draft; only a balance problem needs the extra message and its top-up link.
       if (draft?.topUpUrl) setFailure({ message: `Saved as a draft. ${draft.reason}`, topUpUrl: draft.topUpUrl });
@@ -244,7 +255,7 @@ export default function Builder() {
     if (!project || !revision) return;
     setBusy("Saving scripts…"); setFailure(null);
     try {
-      const p = await appendRevision(gate!.workspace!, project.id, revision.id, { ...game!, files }, "Manual script edits", "Saved script edits");
+      const p = await appendRevision(gate!.workspace!, project.id, revision.id, { ...game!, files }, "Manual script edits", "Saved script edits", needsReview(revision));
       setProject(p); setNotice("Scripts saved as a new revision."); await refreshProjects();
     } catch (e) { setFailure(e as Failure); }
     finally { setBusy(""); }
@@ -254,7 +265,7 @@ export default function Builder() {
     setBusy("Restoring revision…"); setFailure(null);
     try { const target = project.revisions.find((r) => r.id === id);
       if (!target) throw new Error("Revision not found.");
-      acceptProject(await appendRevision(gate!.workspace!, project.id, revision.id, target.game, "Restored previous revision", "Restored previous revision")); setNotice("Restored as a new revision. Your previous versions are still in history."); await refreshProjects(); }
+      acceptProject(await appendRevision(gate!.workspace!, project.id, revision.id, target.game, "Restored previous revision", "Restored previous revision", needsReview(target))); setNotice("Restored as a new revision. Your previous versions are still in history."); await refreshProjects(); }
     catch (e) { setFailure(e as Failure); }
     finally { setBusy(""); }
   }
@@ -281,7 +292,7 @@ export default function Builder() {
   return <div className="app-shell">
     <aside className="sidebar"><Logo /><button className="new-project" disabled={locked} onClick={() => { setProject(null); setFiles([]); setPrompt(""); setFailure(null); setNotice(""); history.replaceState(null, "", "/"); }}>＋ New game</button><div className="sidebar-heading">YOUR PROJECTS <span>{projects.length}</span></div><nav aria-label="Projects">{projects.length === 0 && <p className="sidebar-empty">Your first world starts with an idea.</p>}{projects.map((p) => <button className={`project-link ${p.id === project?.id ? "active" : ""}`} key={p.id} disabled={locked} onClick={() => void load(p.id)}><span className="project-icon" aria-hidden="true">◇</span><span><strong>{p.title}</strong><small>{p.needsReview ? "Needs review · " : ""}{p.revisionCount} revision{p.revisionCount === 1 ? "" : "s"}</small></span></button>)}</nav><div className="sidebar-bottom"><input hidden type="file" accept=".json,application/json" ref={importInput} onChange={async (event) => { const file = event.target.files?.[0]; event.target.value = ""; if (!file) return; if (file.size > 3 * 1024 * 1024) { setFailure({ message: "Choose a Studsmith JSON backup smaller than 3 MB." }); return; } try { await importGame(JSON.parse(await file.text())); } catch { setFailure({ message: "That isn't a valid JSON backup. Export a project backup from Studsmith first." }); } }} /><button disabled={locked} onClick={() => importInput.current?.click()}>↥ Import project</button><button disabled={locked} onClick={async () => { setFailure(null); try { setGate(await api<Gate>("/api/publik", post({ action: "settings" }))); } catch (e) { setFailure(e as Failure); } }}>AI settings <span>↗</span></button><button disabled={locked} onClick={async () => { try { await api("/api/publik", post({ action: "sign_out" })); setProject(null); setFiles([]); setProjects([]); setPrompt(""); setNotice(""); initialLoaded.current = false; history.replaceState(null, "", "/"); await refreshGate(); } catch (e) { setFailure(e as Failure); } }}>Sign out</button><div className="account"><span className="account-dot" />{gate.handle ? `@${gate.handle}` : "Connected to Publik"}<small>{gate.provider === "own_key" ? "Own provider" : "Publik connected"}</small></div></div></aside>
     <main className="main-workspace"><header className="topbar"><div><span className="breadcrumb">Workspace</span><span className="separator">/</span><strong>{game?.title || "New game"}</strong>{dirty && <span className="unsaved">Unsaved edits</span>}</div><span className="local-label"><span /> Saved in this browser only</span></header>
-      <div className="messages">{gate.testMode && <div className="notice">Local test mode: AI responses use a fixture. No live Publik account is connected.</div>}{errorBox}{notice && <div className="notice" role="status">{notice}<button className="text-button" aria-label="Dismiss notice" onClick={() => setNotice("")}>×</button></div>}{backupNotice && game && <div className="notice backup-notice" role="status"><span>This game is saved only in this browser. Clearing site data, private browsing, or a full phone can erase it. Download a backup to keep a copy.</span><button disabled={locked} onClick={() => void download("json")}>Download backup</button><button className="text-button" aria-label="Dismiss backup reminder" onClick={dismissBackupNotice}>×</button></div>}{revision?.summary === DRAFT_SUMMARY && !dirty && <div className="draft-banner"><span><strong>{DRAFT_SUMMARY}.</strong> The AI check didn’t pass or didn’t finish on this version. Read Build notes, ask for fixes below, and test in Studio.</span>{tab !== "guide" && <button onClick={() => setTab("guide")}>See findings</button>}</div>}{dirty && <div className="draft-banner"><span>Save your script edits before generating, exporting, or switching projects.</span><button disabled={!!busy} onClick={() => void save()}>Save edits</button><button disabled={!!busy} onClick={() => setFiles(game!.files)}>Discard edits</button></div>}</div>
+      <div className="messages">{gate.testMode && <div className="notice">Local test mode: AI responses use a fixture. No live Publik account is connected.</div>}{errorBox}{notice && <div className="notice" role="status">{notice}<button className="text-button" aria-label="Dismiss notice" onClick={() => setNotice("")}>×</button></div>}{backupNotice && game && <div className="notice backup-notice" role="status"><span>This game is saved only in this browser. Clearing site data, private browsing, or a full phone can erase it. Download a backup to keep a copy.</span><button disabled={locked} onClick={() => void download("json")}>Download backup</button><button className="text-button" aria-label="Dismiss backup reminder" onClick={dismissBackupNotice}>×</button></div>}{revision && needsReview(revision) && !dirty && <div className="draft-banner"><span><strong>{DRAFT_SUMMARY}.</strong> The AI check didn’t pass or didn’t finish on this version. Read Build notes, ask for fixes below, and test in Studio.</span>{tab !== "guide" && <button onClick={() => setTab("guide")}>See findings</button>}</div>}{dirty && <div className="draft-banner"><span>Save your script edits before generating, exporting, or switching projects.</span><button disabled={!!busy} onClick={() => void save()}>Save edits</button><button disabled={!!busy} onClick={() => setFiles(game!.files)}>Discard edits</button></div>}</div>
       {loadingProject ? <div className="empty-state" role="status">Opening project…</div> : !game ? <section className="welcome"><div className="welcome-icon" aria-hidden="true">▱</div><span className="eyebrow">YOUR NEXT GAME STARTS HERE</span><h1>Imagine it.<br /><span>Build it in studs.</span></h1><p>Describe a world, its rules, and what makes it fun.<br />Get real Luau scripts and a place you can open in Studio.</p><div className="starter-list">{STARTER_PROMPTS.map((s, i) => <button disabled={!!busy} key={s.title} onClick={() => { setPrompt(s.prompt); promptInput.current?.focus(); }}><span className="starter-number">0{i + 1}</span><span>{s.title}</span><span aria-hidden="true">↗</span></button>)}</div></section> : <section className="project-workspace"><div className="project-heading"><div><span className="eyebrow">{game.parts.length} PARTS · {game.files.length} SCRIPTS · REVISION {project!.revisions.length}</span><h1>{game.title}</h1><p>{game.description}</p></div><button className="primary" disabled={locked} onClick={() => setTab("export")}>Export to Studio ↗</button></div><nav className="tabs" aria-label="Project views">{([ ["preview", "Scene"], ["code", "Scripts"], ["guide", "Play & test"], ["plan", "Game plan"], ["history", "History"], ["export", "Export"] ] as [Tab, string][]).map(([value, label]) => <button key={value} aria-current={tab === value ? "page" : undefined} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>{label}</button>)}</nav>
         {tab === "preview" && <div className="preview-layout"><div className="preview-main"><div className="preview-label"><span className="status-dot" />Static scene preview<span>Play scripts in Roblox Studio</span></div><Scene game={game} selected={selectedPart} onSelect={setSelectedPart} /></div><aside className="inspector"><h2>World <span>{game.parts.length}</span></h2><div className="part-list">{game.parts.map((p) => <button key={p.id} className={selectedPart === p.id ? "selected" : ""} onClick={() => setSelectedPart(p.id)}><span className="part-swatch" style={{ background: p.color }} />{p.name}<small>{p.kind}</small></button>)}</div>{activePart && <div className="part-details"><h3>{activePart.name}</h3><dl><dt>Position</dt><dd>{activePart.position.join(", ")}</dd><dt>Size</dt><dd>{activePart.size.join(" × ")}</dd><dt>Material</dt><dd>{activePart.material}</dd><dt>Anchored</dt><dd>{activePart.anchored ? "Yes" : "No"}</dd></dl></div>}</aside></div>}
         {tab === "code" && <div className="code-layout"><nav className="file-list" aria-label="Script files">{files.map((file) => <button key={file.path} className={selectedFile === file.path ? "active" : ""} onClick={() => setSelectedFile(file.path)}><span className="file-type">{file.path.endsWith(".server.luau") ? "S" : file.path.endsWith(".client.luau") ? "C" : "M"}</span>{file.path}</button>)}</nav><div className="editor-panel"><div className="editor-heading"><code>{selectedFile}</code><span>Luau</span><button disabled={!dirty || !!busy} onClick={() => void save()}>Save scripts</button></div><label className="sr-only" htmlFor="source-editor">Luau source for {selectedFile}</label><textarea id="source-editor" className="source-editor" value={activeFile?.source || ""} spellCheck={false} autoCapitalize="off" autoCorrect="off" disabled={!!busy} onChange={(event) => setFiles(files.map((f) => f.path === selectedFile ? { ...f, source: event.target.value } : f))} /><div className="editor-footer">{activeFile?.source.split("\n").length || 0} lines<span>Code is not executed on your computer.</span></div></div></div>}

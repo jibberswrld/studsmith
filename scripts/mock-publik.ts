@@ -6,7 +6,7 @@ import { exampleGame } from "../src/lib/example";
 const port = Number(process.env.MOCK_PUBLIK_PORT || 4556);
 const origin = `http://127.0.0.1:${port}`;
 const installs = new Map<string, { key: string; claimed: boolean }>();
-// mode: ok | 402 | 402-<stage> | length-<stage> | invalid | repair | repair-twice | reject. delayMs slows every AI stage.
+// mode: ok | 402 | 402-<stage> | length-<stage> | invalid | invalid-build | repair | repair-twice | reject. delayMs slows every AI stage.
 let mode = "ok", reviewCount = 0, delayMs = 0;
 // One fixture wallet for every claimed install. New Publik accounts get $0.05 of free use; GET /wallet simulates buying a plan.
 let wallet = { plan: { kind: "none", label: null as string | null }, balance_micros: 50_000 };
@@ -63,7 +63,7 @@ createServer(async (req, res) => {
       if (res.destroyed) return;
       if (mode === "402" || mode === `402-${request.stage}`) return send(res, 402, { error: { message: "Your publik balance is empty.", top_up_url: `${origin}/wallet` } });
       if (mode === `length-${request.stage}`) return send(res, 200, { choices: [{ message: { content: "{}" }, finish_reason: "length" }] });
-      if (mode === "invalid") return send(res, 200, { choices: [{ message: { content: "{\"title\":\"Incomplete\"}" }, finish_reason: "stop" }] });
+      if (mode === "invalid" || (mode === "invalid-build" && request.stage === "build")) return send(res, 200, { choices: [{ message: { content: "{\"title\":\"Incomplete\"}" }, finish_reason: "stop" }] });
       if (request.stage === "design") return send(res, 200, { choices: [{ message: { content: JSON.stringify({ concept: "A fixture obby", coreLoop: "Jump between checkpoints, finish, and restart.", firstThirtySeconds: "Spawn safely and reach the first checkpoint.", mechanics: ["Checkpoint progression", "Lava damage", "Race timer"], worldLayout: "Ten platforms between a start and finish island.", artDirection: "Mint and sandstone fixture palette.", playerFeedback: "A checkpoint and timer HUD.", replayAndProgression: "Reset after finishing to replay.", implementationChecks: ["Check respawn", "Check finish"], businessPlan }) }, finish_reason: "stop" }] });
       if (request.stage === "review") {
         reviewCount++;

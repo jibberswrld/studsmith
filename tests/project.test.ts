@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { unzipSync, strFromU8 } from "fflate";
 import { exampleGame } from "../src/lib/example";
-import { current, GameSchema } from "../src/lib/project";
+import { current, DRAFT_SUMMARY, GameSchema, needsReview } from "../src/lib/project";
 import { placeXml, sourceZip } from "../src/lib/export";
 import { appendRevision, createProject, listProjects, loadProject } from "../src/lib/storage";
 
@@ -70,4 +70,20 @@ test("the committed Lantern Run example is a valid, exportable game", async () =
   assert.equal(game.parts.length, 77);
   assert.ok(placeXml(game).includes('<Item class="SpawnLocation"'));
   assert.doesNotMatch(JSON.stringify(lantern), /pk_|pat_|sk-|Bearer|https?:\/\//);
+});
+
+test("draft status survives script saves and restores, clears on a passing build, and reads older projects", async () => {
+  const scope = crypto.randomUUID();
+  let project = await createProject(scope, exampleGame, "Build", DRAFT_SUMMARY, true);
+  project = await appendRevision(scope, project.id, current(project).id, { ...exampleGame, title: "Edited" }, "Manual script edits", "Saved script edits", needsReview(current(project)));
+  assert.equal(needsReview(current(project)), true);
+  assert.equal((await listProjects(scope))[0].needsReview, true);
+  project = await appendRevision(scope, project.id, current(project).id, exampleGame, "Fix it", "Updated game", false);
+  assert.equal((await listProjects(scope))[0].needsReview, false);
+  const draftRevision = project.revisions[0];
+  project = await appendRevision(scope, project.id, current(project).id, draftRevision.game, "Restored previous revision", "Restored previous revision", needsReview(draftRevision));
+  assert.equal((await listProjects(scope))[0].needsReview, true);
+  // Projects saved before the flag existed only carry the label.
+  assert.equal(needsReview({ ...draftRevision, needsReview: undefined, summary: DRAFT_SUMMARY }), true);
+  assert.equal(needsReview({ ...draftRevision, needsReview: undefined, summary: "Created project" }), false);
 });

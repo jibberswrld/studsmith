@@ -56,6 +56,8 @@ Trace the code and world together: script paths and instance names, module impor
 /** Total time for all AI calls. Stays well inside the route's maxDuration (540 s). Tests may shorten it. */
 export const generationBudgetMs = () => Math.min(Number(process.env.STUDSMITH_GENERATION_BUDGET_MS) || 480_000, 480_000);
 type Stage = Extract<BuildEvent, { type: "stage" }>["stage"];
+/** Conservative duration of one review stage until this run has measured a real one. */
+const REVIEW_ESTIMATE_MS = 90_000;
 const SAVED_NOTE = "Studsmith saved this version so the AI work isn't lost.";
 export type GenerationResult = { game: Game; draft: Draft | null };
 
@@ -99,7 +101,8 @@ export async function generateGame(prompt: string, game: Game | null, config: Pr
     catch { throw new ApiError(422, "The AI returned incomplete project JSON. Try again with a smaller request."); }
   }
   // Another repair is only worth starting if a repair and its review can finish before the deadline.
-  const roomForRepair = () => budget - (Date.now() - startedAt) > ((took.repair ?? took.build ?? 0) + (took.review ?? 0)) * 1.15;
+  // Before any review has run (a structural repair of the first build), assume a review takes REVIEW_ESTIMATE_MS.
+  const roomForRepair = () => budget - (Date.now() - startedAt) > ((took.repair ?? took.build ?? 0) + (took.review ?? REVIEW_ESTIMATE_MS)) * 1.15;
 
   const planResult = PlanSchema.safeParse(await completion("design", 1, DESIGNER, { stage: "design", request: prompt, currentGame: game }, 16000));
   if (!planResult.success) throw new ApiError(422, "The AI couldn't produce a complete game design. Your saved project is unchanged; try again.");
