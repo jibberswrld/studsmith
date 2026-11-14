@@ -7,7 +7,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { arch, homedir, hostname, platform } from "node:os";
+import { arch, homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import pkg from "../../../package.json";
 
@@ -110,7 +110,7 @@ export async function provision(opts: { installId?: string; priorKey?: string | 
         signal: AbortSignal.timeout(20_000),
         body: JSON.stringify({
           app_token: token, app_slug: APP_SLUG, app_version: APP_VERSION, os: OS, ...ARCH,
-          device_name: hostname().slice(0, 120), install_id: installId, disclosure_version: 1, dialects: ["chat_completions"],
+          device_name: "Studsmith (web)", install_id: installId, disclosure_version: 1, dialects: ["chat_completions"],
         }),
       });
     } catch (e) {

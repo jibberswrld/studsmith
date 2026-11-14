@@ -73,10 +73,28 @@ export const GameSchema = z.object({
 export type Game = z.infer<typeof GameSchema>;
 export type Part = z.infer<typeof PartSchema>;
 export type GameFile = z.infer<typeof FileSchema>;
-export type Revision = { id: string; createdAt: string; prompt: string; summary: string; game: Game };
+/** needsReview marks a saved game that didn't pass the AI check. Older revisions only have the DRAFT_SUMMARY label. */
+export type Revision = { id: string; createdAt: string; prompt: string; summary: string; game: Game; needsReview?: boolean };
 export type Project = { id: string; createdAt: string; updatedAt: string; revisions: Revision[] };
-export type ProjectSummary = { id: string; title: string; description: string; updatedAt: string; revisionCount: number };
+export type ProjectSummary = { id: string; title: string; description: string; updatedAt: string; revisionCount: number; needsReview: boolean };
+
+/** Conservative AI cost of one build on publik-smart (observed $0.45–$1.60). Shown to visitors and used to gate Publik builds. */
+export const BUILD_ESTIMATE_MICROS = 1_000_000;
+export const dollars = (micros: number) => `$${(micros / 1_000_000).toFixed(2)}`;
+/** "$1" for whole dollars, used for the rough build estimate. */
+export const BUILD_ESTIMATE = dollars(BUILD_ESTIMATE_MICROS).replace(/\.00$/, "");
+/** Revision label for a schema-valid game that did not pass the AI check. */
+export const DRAFT_SUMMARY = "Needs review — failed AI check";
+export type Finding = { severity: "blocker" | "major" | "minor"; location: string; problem: string; fix: string };
+export type Draft = { reason: string; findings: Finding[]; topUpUrl?: string | null };
+/** One line of the newline-delimited JSON stream from POST /api/generate. The last line is "result" or "error". */
+export type BuildEvent =
+  | { type: "stage"; stage: "design" | "build" | "review" | "repair"; attempt: number; status: "started" | "finished" }
+  | { type: "ping" }
+  | { type: "result"; game: Game; draft: Draft | null }
+  | { type: "error"; error: { message: string; topUpUrl?: string | null } };
 export const current = (project: Project) => project.revisions[project.revisions.length - 1];
+export const needsReview = (revision: Revision) => revision.needsReview ?? revision.summary === DRAFT_SUMMARY;
 export const exportName = (title: string) => title.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "game";
 
 export const STARTER_PROMPTS = [
