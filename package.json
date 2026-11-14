@@ -1,0 +1,37 @@
+{
+  "name": "studsmith",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1 -p 3018",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1 -p 3018",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:integration": "tsx scripts/test-integration.ts",
+    "mock:publik": "tsx scripts/mock-publik.ts"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "next": "16.4.6",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1",
+    "three": "^0.186.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/three": "^0.183.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.6",
+    "tsx": "^4.20.0",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@11.0.9",
+  "type": "module",
+  "license": "MIT"
+}

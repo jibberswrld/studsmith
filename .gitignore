@@ -1,0 +1,8 @@
+node_modules/
+.next/
+.env*
+!.env.example
+.test-data/
+.studsmith/
+*.tsbuildinfo
+next-env.d.ts
