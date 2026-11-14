@@ -1,3 +1,4 @@
+import { osFromUA, deviceName } from "../src/lib/server/visitor";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { localRequest } from "../src/lib/server/http";
@@ -18,4 +19,14 @@ test("STUDSMITH_APP_ORIGIN accepts a comma-separated list of exact origins along
     assert.equal(allowed("other.vercel.app"), false);
     assert.equal(allowed("studsmith.example", "https://other.example"), false);
   } finally { process.env = saved; }
+});
+
+test("visitor OS and device names", () => {
+  for (const [ua, os, name] of [
+    ["Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130.0 Safari/537.36", "macos", "Chrome on macOS"],
+    ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0 Safari/537.36 Edg/130.0", "windows", "Edge on Windows"],
+    ["Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Version/18.0 Safari/604.1", "macos", "Safari on iPhone"],
+    ["Mozilla/5.0 (Linux; Android 14) Chrome/130.0 Safari/537.36", "linux", "Chrome on Android"],
+    ["", "linux", "Browser on web"],
+  ]) { assert.equal(osFromUA(ua), os); assert.equal(deviceName(ua), name); }
 });

@@ -20,7 +20,7 @@ export const POST = handle(async (req: Request) => {
   if (body.action === "telemetry") {
     const field = body.event === "app_opened" ? "openedAt" : "activeAt";
     if (Date.now() - auth.session[field] > 30 * 60 * 1000) {
-      await sendEvent(body.event, { key: auth.key, installId: auth.session.install_id });
+      await sendEvent(body.event, { key: auth.key, installId: auth.session.install_id, os: auth.session.os });
       await writeSession({ ...auth.session, [field]: Date.now() });
     }
     return json({ ok: true });

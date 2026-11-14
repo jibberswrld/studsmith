@@ -5,6 +5,7 @@ import { z } from "zod";
 import { ApiError } from "./http";
 
 const CookieSchema = z.object({
+  os: z.enum(["macos", "windows", "linux"]).default("linux"),
   key: z.string(), base_url: z.string(), install_id: z.string(), claim_url: z.string().nullable(),
   choice: z.enum(["publik", "own_key"]).nullable().default(null),
   ownKey: z.object({ baseURL: z.string(), apiKey: z.string(), model: z.string() }).optional(),
@@ -30,7 +31,7 @@ export async function readSession(): Promise<Session | null> {
     return session.expiresAt > Date.now() ? session : null;
   } catch { return null; }
 }
-export async function writeSession(input: Omit<Session, "expiresAt" | "openedAt" | "activeAt"> & Partial<Session>) {
+export async function writeSession(input: Omit<Session, "expiresAt" | "openedAt" | "activeAt" | "os"> & Partial<Session>) {
   const session = CookieSchema.parse({ openedAt: 0, activeAt: 0, ...input, expiresAt: Date.now() + 30 * 86400000 });
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);

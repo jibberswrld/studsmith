@@ -11,6 +11,8 @@ let mode = "ok", reviewCount = 0, delayMs = 0;
 // One fixture wallet for every claimed install. New Publik accounts get $0.05 of free use; GET /wallet simulates buying a plan.
 let wallet = { plan: { kind: "none", label: null as string | null }, balance_micros: 50_000 };
 const requests: string[] = [];
+const telemetry: { os: string; hasArch: boolean }[] = [];
+const registrations: { os: string; device_name: string; hasArch: boolean }[] = [];
 const calls: { model: string; stage: string; hasCurrentGame: boolean; skills: string[] }[] = [];
 const businessPlan = {
   audience: "Players who enjoy short skill challenges.", hook: "A short checkpoint race.", retentionLoop: "Replay to improve completion time.",
@@ -30,6 +32,7 @@ createServer(async (req, res) => {
     const install = [...installs.entries()].find(([, value]) => req.headers.authorization === `Bearer ${value.key}`);
     if (url.pathname === "/api/v1/installs") {
       if (body.app_token !== "pat_studsmith_test" || body.app_slug !== "studsmith") return send(res, 401, { error: { message: "Incorrect fixture app token or slug." } });
+      registrations.push({ os: body.os, device_name: body.device_name, hasArch: "arch" in body });
       let saved = installs.get(body.install_id);
       const existed = !!saved;
       if (!saved) { saved = { key: `pk_test_${randomUUID()}`, claimed: false }; installs.set(body.install_id, saved); }
@@ -49,10 +52,10 @@ createServer(async (req, res) => {
     }
     if (url.pathname === "/mock/mode") { mode = body.mode || "ok"; delayMs = Number(body.delayMs) || 0; reviewCount = 0; return send(res, 200, { mode, delayMs }); }
     if (url.pathname === "/mock/wallet") { wallet = { plan: { kind: body.kind || "none", label: body.label ?? null }, balance_micros: Number(body.balance_micros) || 0 }; return send(res, 200, wallet); }
-    if (url.pathname === "/mock/state") return send(res, 200, { calls, events, requests, installs: installs.size });
+    if (url.pathname === "/mock/state") return send(res, 200, { calls, events, requests, registrations, telemetry, installs: installs.size });
     if (!install) return send(res, 401, { error: { message: "Invalid fixture key." } });
     if (url.pathname === "/api/v1/wallet") return send(res, 200, { claim_state: install[1].claimed ? "claimed" : "anonymous", claim_url: `${origin}/claim/${install[0]}`, account: install[1].claimed ? { handle: "local-test" } : null, plan: install[1].claimed ? wallet.plan : { kind: "none", label: null }, balance_micros: install[1].claimed ? wallet.balance_micros : 0, top_up_url: `${origin}/wallet`, linked_at: install[1].claimed ? new Date().toISOString() : null });
-    if (url.pathname === "/api/v1/telemetry") { events.push(body.event); return send(res, 202, { ok: true }); }
+    if (url.pathname === "/api/v1/telemetry") { events.push(body.event); telemetry.push({ os: body.os, hasArch: "arch" in body }); return send(res, 202, { ok: true }); }
     if (url.pathname === "/api/v1/chat/completions") {
       if (!install[1].claimed) return send(res, 401, { error: { message: "Claim first." } });
       if (!["publik-balanced", "publik-smart"].includes(body.model)) return send(res, 400, { error: { message: "Only Publik model aliases are supported." } });

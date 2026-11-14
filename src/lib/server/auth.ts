@@ -1,4 +1,6 @@
 import "server-only";
+import { headers } from "next/headers";
+import { osFromUA, deviceName } from "./visitor";
 import { createHash } from "node:crypto";
 import { BUILD_ESTIMATE, BUILD_ESTIMATE_MICROS, dollars } from "../project";
 import { ApiError } from "./http";
@@ -49,8 +51,10 @@ export async function signIn() {
   if (!isConfigured()) throw new ApiError(503, "This deployment needs Studsmith's Publik app token configured.");
   let session = await readSession();
   if (!session) {
-    const install = await provision({ persist: false }).catch(() => { throw new ApiError(503, "Publik is not reachable. Check your connection."); });
-    session = await writeSession({ ...install, choice: null });
+    const ua = (await headers()).get("user-agent") ?? "";
+    const os = osFromUA(ua);
+    const install = await provision({ persist: false, os, deviceName: deviceName(ua) }).catch(() => { throw new ApiError(503, "Publik is not reachable. Check your connection."); });
+    session = await writeSession({ ...install, os, choice: null });
   }
   const next = await gate();
   // A freshly written cookie isn't readable in this request, so gate() still says sign_in without a link.
