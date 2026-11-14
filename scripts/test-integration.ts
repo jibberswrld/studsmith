@@ -29,14 +29,14 @@ function browser() {
   let cookie = "";
   return {
     async request(path: string, body?: unknown, at = base) {
-      const response = await fetch(`${at}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json", Origin: at, ...(cookie ? { Cookie: cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      const response = await fetch(`${at}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json", Origin: at, "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/130.0 Safari/537.36", ...(cookie ? { Cookie: cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
       const saved = response.headers.get("set-cookie");
       if (saved) { assert.match(saved, /HttpOnly/i); assert.match(saved, /SameSite=lax/i); assert.ok(!saved.includes("pk_test_")); cookie = saved.split(";")[0]; }
       return { status: response.status, body: await response.json() };
     },
     /** POST /api/generate. Returns the parsed NDJSON stream, or the JSON error sent before the build started. */
     async generate(body: unknown, at = base) {
-      const response = await fetch(`${at}/api/generate`, { method: "POST", headers: { "Content-Type": "application/json", Origin: at, ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body) });
+      const response = await fetch(`${at}/api/generate`, { method: "POST", headers: { "Content-Type": "application/json", Origin: at, "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/130.0 Safari/537.36", ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body) });
       if (!response.headers.get("content-type")?.includes("ndjson")) return { status: response.status, events: [] as BuildEvent[], final: null, error: (await response.json()).error };
       const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as BuildEvent);
       const final = events.at(-1) as Final;
@@ -69,6 +69,7 @@ try {
   assert.equal((await mockState()).installs, installsBefore);
   gate = await alice.request("/api/publik", { action: "sign_in" });
   assert.equal(gate.body.state, "sign_in"); assert.ok(gate.body.claimUrl);
+  assert.deepEqual((await mockState()).registrations.at(-1), { os: "macos", device_name: "Chrome on macOS", hasArch: false });
   assert.equal((await mockState()).installs, installsBefore + 1);
   assert.equal((await alice.request("/api/publik", { action: "sign_in" })).body.claimUrl, gate.body.claimUrl, "a second click reuses the install");
   assert.equal((await mockState()).installs, installsBefore + 1);
@@ -181,6 +182,7 @@ try {
   const state = await (await fetch(`${mockBase}/mock/state`)).json();
   for (const call of state.calls) assert.deepEqual(call.skills, ["roblox-game-design", "roblox-worldcraft", "roblox-economy-growth"]);
   assert.ok(state.events.includes("app_opened"));
+  assert.deepEqual(state.telemetry.at(-1), { os: "macos", hasArch: false });
   await writeFile(join(dir, "Cloudstep.rbxlx"), placeXml(game)); await writeFile(join(dir, "Cloudstep.zip"), sourceZip(game));
   const self = start("next", ["start", "-H", "127.0.0.1", "-p", "3020"], { PUBLIK_SELF_TEST: "1" });
   await new Promise<void>((resolve, reject) => self.child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(self.output()))));

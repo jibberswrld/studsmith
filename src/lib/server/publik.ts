@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { arch, homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
+import type { PublikOS } from "./visitor";
 import pkg from "../../../package.json";
 
 export const APP_SLUG = "studsmith";
@@ -23,7 +24,6 @@ export const POLL_MS = 3_000;
 export const POLL_LIMIT_MS = 10 * 60_000;
 
 export type Choice = "publik" | "own_key";
-export type PublikOS = "macos" | "windows" | "linux";
 
 export interface Wallet {
   claim_state: "anonymous" | "claimed";
@@ -97,7 +97,7 @@ function isOffline(e: unknown): boolean {
 }
 
 /** POST /api/v1/installs: a publik key for one browser session. Throws a readable message. */
-export async function provision(opts: { installId?: string; priorKey?: string | null; persist?: boolean } = {}): Promise<Installed> {
+export async function provision(opts: { installId?: string; priorKey?: string | null; persist?: boolean; os?: PublikOS; deviceName?: string } = {}): Promise<Installed> {
   const token = appToken();
   if (!token.startsWith("pat_")) throw new Error("This build has no publik app token. Ask the developer for a new build.");
   let installId = opts.installId ?? randomUUID();
@@ -109,8 +109,8 @@ export async function provision(opts: { installId?: string; priorKey?: string | 
         headers: { "content-type": "application/json" },
         signal: AbortSignal.timeout(20_000),
         body: JSON.stringify({
-          app_token: token, app_slug: APP_SLUG, app_version: APP_VERSION, os: OS, ...ARCH,
-          device_name: "Studsmith (web)", install_id: installId, disclosure_version: 1, dialects: ["chat_completions"],
+          app_token: token, app_slug: APP_SLUG, app_version: APP_VERSION, os: opts.os ?? OS, ...(opts.persist === false ? {} : ARCH),
+          device_name: (opts.deviceName ?? "Studsmith self-test").slice(0, 120), install_id: installId, disclosure_version: 1, dialects: ["chat_completions"],
         }),
       });
     } catch (e) {
@@ -187,10 +187,10 @@ function telemetryInstallId(): string {
 }
 
 /** POST /api/v1/telemetry with the install key and no content. Never throws. */
-export async function sendEvent(event: "app_opened" | "active_session", s: { key: string; installId?: string }): Promise<number | null> {
+export async function sendEvent(event: "app_opened" | "active_session", s: { key: string; installId?: string; os?: PublikOS }): Promise<number | null> {
   if (usageOff()) return null;
   try {
-    const body = { v: 1, app: APP_SLUG, install_id: s.installId || telemetryInstallId(), event, app_version: APP_VERSION.replace(/^v/i, ""), os: OS, ...ARCH };
+    const body = { v: 1, app: APP_SLUG, install_id: s.installId || telemetryInstallId(), event, app_version: APP_VERSION.replace(/^v/i, ""), os: s.os ?? "linux" };
     const res = await fetch(process.env.PUBLIK_TELEMETRY_URL || `${ORIGIN}/api/v1/telemetry`, {
       method: "POST", signal: AbortSignal.timeout(5_000),
       headers: { "content-type": "application/json", ...(s.key.startsWith("pk_") ? { authorization: `Bearer ${s.key}` } : {}) },
