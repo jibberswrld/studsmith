@@ -60,12 +60,12 @@ export async function generateGame(prompt: string, game: Game | null, tier: "pub
     const markdown = await readFile(join(process.cwd(), "skills", name, "SKILL.md"), "utf8");
     return `<design-skill name="${name}">\n${markdown}\n</design-skill>`;
   }))).join("\n\n");
-  const deadline = AbortSignal.any([signal, AbortSignal.timeout(360000)]);
+  const deadline = AbortSignal.any([signal, AbortSignal.timeout(270000)]);
   async function completion(system: string, payload: unknown, maxTokens: number): Promise<unknown> {
     let res: Response;
     try {
       res = await fetch(`${config.baseURL.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
+      method: "POST", redirect: "error", headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
       body: JSON.stringify({ model: config.model, max_tokens: maxTokens, response_format: { type: "json_object" }, messages: [{ role: "system", content: `${system}\n\nApply the relevant guidance from these project-owned skills. Respect this stage's output contract and the user's requested scope.\n${skills}` }, { role: "user", content: JSON.stringify(payload) }] }),
       signal: deadline,
     });
@@ -100,7 +100,7 @@ export async function generateGame(prompt: string, game: Game | null, tier: "pub
     const serious = review.issues.filter((issue) => issue.severity !== "minor");
     if (serious.length === 0) {
       const notes = parsed.data.notes.filter((note) => !note.startsWith("AI static review:"));
-      return { ...parsed.data, businessPlan: plan.businessPlan, notes: [...notes.slice(0, 18), `AI static review: ${review.summary} This is not a Studio playtest.`, ...review.issues.slice(0, 1).map((issue) => `Remaining polish: ${issue.problem}`)] };
+      return { ...parsed.data, businessPlan: plan.businessPlan, notes: [...notes.slice(0, 18), `AI static review: ${review.summary.slice(0, 850)} This is not a Studio playtest.`, ...review.issues.slice(0, 1).map((issue) => `Remaining polish: ${issue.problem.slice(0, 900)}`)] };
     }
     if (attempt === 1) throw new ApiError(422, `The project failed its AI review after repair: ${serious.slice(0, 2).map((issue) => `${issue.location}: ${issue.problem}`).join(" ")} Your saved revision is unchanged.`);
     candidate = await completion(SYSTEM, { stage: "repair", request: prompt, design: plan, currentGame: parsed.data, issues: serious, instruction: "Fix every blocker and major issue, preserve working features, and return the entire project." }, 24000);
