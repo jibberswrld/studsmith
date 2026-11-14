@@ -63,3 +63,11 @@ test("Rojo builds the exported source bundle, including world geometry and scrip
   const result = execFileSync("rojo", ["build", "default.project.json", "-o", "rebuilt.rbxlx"], { cwd: dir, encoding: "utf8" });
   assert.match(result, /Built/);
 });
+
+test("the committed Lantern Run example is a valid, exportable game", async () => {
+  const { default: lantern } = await import("../src/lib/examples/lantern-run.json", { with: { type: "json" } });
+  const game = GameSchema.parse(lantern);
+  assert.equal(game.parts.length, 77);
+  assert.ok(placeXml(game).includes('<Item class="SpawnLocation"'));
+  assert.doesNotMatch(JSON.stringify(lantern), /pk_|pat_|sk-|Bearer|https?:\/\//);
+});
