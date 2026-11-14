@@ -69,10 +69,20 @@ try {
     assert.equal(failed.status, value === "402" ? 402 : 422);
     if (value === "402") assert.equal(failed.body.error.topUpUrl, `${mockBase}/wallet`);
   }
+  for (const stage of ["design", "build", "review"]) {
+    await mode(`length-${stage}`);
+    const limited = await alice.request("/api/generate", gen);
+    assert.equal(limited.status, 422);
+    assert.match(limited.body.error.message, new RegExp(`AI ${stage} stage exceeded`));
+  }
   await mode("repair");
   assert.equal((await alice.request("/api/generate", gen)).status, 200);
   const repairedState = await (await fetch(`${mockBase}/mock/state`)).json();
   assert.deepEqual(repairedState.calls.slice(-5).map((call: { stage: string }) => call.stage), ["design", "build", "review", "repair", "review"]);
+  await mode("repair-twice");
+  assert.equal((await alice.request("/api/generate", gen)).status, 200);
+  const twice = await (await fetch(`${mockBase}/mock/state`)).json();
+  assert.deepEqual(twice.calls.slice(-7).map((call: { stage: string }) => call.stage), ["design", "build", "review", "repair", "review", "repair", "review"]);
   await mode("reject");
   const rejected = await alice.request("/api/generate", gen);
   assert.equal(rejected.status, 422); assert.match(rejected.body.error.message, /failed its AI review after repair/);

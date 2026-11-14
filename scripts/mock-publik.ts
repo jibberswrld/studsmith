@@ -49,11 +49,12 @@ createServer(async (req, res) => {
       const skillNames = [...String(body.messages[0].content).matchAll(/<design-skill name="([^"]+)">/g)].map((match) => match[1]);
       calls.push({ model: body.model, stage: request.stage, hasCurrentGame: !!request.currentGame, skills: skillNames });
       if (mode === "402") return send(res, 402, { error: { message: "Your publik balance is empty.", top_up_url: `${origin}/wallet` } });
+      if (mode === `length-${request.stage}`) return send(res, 200, { choices: [{ message: { content: "{}" }, finish_reason: "length" }] });
       if (mode === "invalid") return send(res, 200, { choices: [{ message: { content: "{\"title\":\"Incomplete\"}" }, finish_reason: "stop" }] });
       if (request.stage === "design") return send(res, 200, { choices: [{ message: { content: JSON.stringify({ concept: "A fixture obby", coreLoop: "Jump between checkpoints, finish, and restart.", firstThirtySeconds: "Spawn safely and reach the first checkpoint.", mechanics: ["Checkpoint progression", "Lava damage", "Race timer"], worldLayout: "Ten platforms between a start and finish island.", artDirection: "Mint and sandstone fixture palette.", playerFeedback: "A checkpoint and timer HUD.", replayAndProgression: "Reset after finishing to replay.", implementationChecks: ["Check respawn", "Check finish"], businessPlan }) }, finish_reason: "stop" }] });
       if (request.stage === "review") {
         reviewCount++;
-        const needsRepair = mode === "reject" || (mode === "repair" && reviewCount === 1);
+        const needsRepair = mode === "reject" || (mode === "repair" && reviewCount === 1) || (mode === "repair-twice" && reviewCount <= 2);
         return send(res, 200, { choices: [{ message: { content: JSON.stringify({ summary: "Deterministic fixture review; not a quality or playtest result.", issues: needsRepair ? [{ severity: "major", location: "server/Obby.server.luau", problem: "Fixture asks for a repair to verify the pipeline.", fix: "Return a corrected complete project." }] : [] }) }, finish_reason: "stop" }] });
       }
       const game = structuredClone(request.currentGame || exampleGame);
