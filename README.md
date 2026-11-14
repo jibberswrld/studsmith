@@ -2,7 +2,7 @@
 
 Describe a Roblox game, refine its world and Luau scripts, and export a place that opens directly in Roblox Studio.
 
-Studsmith is an open-source browser app built with Publik. The [Publik listing](https://publikhq.com/studsmith) is registered; the hosted Get started flow is being connected. Source: [jibberswrld/studsmith](https://github.com/jibberswrld/studsmith).
+Studsmith is an open-source browser app built with Publik. Try the [hosted builder](https://studsmith-theta.vercel.app). The [Publik listing](https://publikhq.com/studsmith) is registered; its launch link is being connected. Source: [jibberswrld/studsmith](https://github.com/jibberswrld/studsmith).
 
 ## Build a game
 
