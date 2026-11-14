@@ -7,15 +7,19 @@ export const json = (body: unknown, status = 200) => Response.json(body, { statu
 
 export function localRequest(req: Request) {
   const url = new URL(req.url);
-  // Next.js may normalize req.url to localhost even when the browser uses 127.0.0.1.
-  // Validate the actual Host as loopback, then compare Origin against that authority.
   const host = req.headers.get("host");
-  let authority: URL;
-  try { authority = new URL(`${url.protocol}//${host}`); }
-  catch { throw new ApiError(403, "Studsmith runs on this computer only."); }
-  if (!host || authority.host !== host.toLowerCase() || !["localhost", "127.0.0.1", "[::1]"].includes(authority.hostname) || authority.port !== url.port) throw new ApiError(403, "Studsmith runs on this computer only.");
+  const trustedOrigins = [process.env.STUDSMITH_APP_ORIGIN, ...[process.env.VERCEL_PROJECT_PRODUCTION_URL, process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL].filter(Boolean).map((domain) => `https://${domain}`)].filter((value): value is string => !!value);
+  let expected: URL;
+  if (process.env.VERCEL || trustedOrigins.length) {
+    const match = trustedOrigins.map((value) => new URL(value)).find((value) => value.host === host?.toLowerCase());
+    if (!match) throw new ApiError(403, "Open Studsmith directly to continue.");
+    expected = match;
+  } else {
+    expected = new URL(`${url.protocol}//${host}`);
+    if (!host || expected.host !== host.toLowerCase() || !["localhost", "127.0.0.1", "[::1]"].includes(expected.hostname)) throw new ApiError(403, "Open Studsmith directly to continue.");
+  }
   const origin = req.headers.get("origin");
-  if ((origin && origin !== authority.origin) || req.headers.get("sec-fetch-site") === "cross-site") throw new ApiError(403, "Open Studsmith directly to continue.");
+  if ((origin && origin !== expected.origin) || req.headers.get("sec-fetch-site") === "cross-site") throw new ApiError(403, "Open Studsmith directly to continue.");
 }
 export async function readJson(req: Request) {
   const limit = 3 * 1024 * 1024;

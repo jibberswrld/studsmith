@@ -2,10 +2,12 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { current, exportName, STARTER_PROMPTS, type GameFile, type Project, type ProjectSummary } from "@/lib/project";
+import { listProjects, loadProject, createProject, appendRevision } from "@/lib/storage";
+import { placeXml, sourceZip } from "@/lib/export";
+import { current, exportName, STARTER_PROMPTS, type Game, type GameFile, type Project, type ProjectSummary } from "@/lib/project";
 
 const Scene = dynamic(() => import("./scene"), { ssr: false, loading: () => <div className="scene-loading">Opening 3D preview…</div> });
-type Gate = { state: string; title?: string; body?: string; claimUrl?: string | null; topUpUrl?: string | null; hasPlan?: boolean; handle?: string | null; provider?: string; testMode?: boolean };
+type Gate = { state: string; title?: string; body?: string; claimUrl?: string | null; topUpUrl?: string | null; hasPlan?: boolean; handle?: string | null; provider?: string; workspace?: string; testMode?: boolean };
 type Failure = { message: string; topUpUrl?: string | null };
 type Tab = "preview" | "code" | "guide" | "history" | "export" | "plan";
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
@@ -57,11 +59,11 @@ export default function Builder() {
   }, [gate?.state, refreshGate]);
   useEffect(() => {
     if (gate?.state !== "ready") return;
-    void api<ProjectSummary[]>("/api/projects").then(setProjects).catch((e) => setFailure(e));
+    void listProjects(gate.workspace!).then(setProjects).catch((e) => setFailure(e));
     void api("/api/publik", post({ action: "telemetry", event: "app_opened" })).catch(() => {});
     const timer = setInterval(() => { if (!document.hidden) void api("/api/publik", post({ action: "telemetry", event: "active_session" })).catch(() => {}); }, 30 * 60 * 1000);
     return () => clearInterval(timer);
-  }, [gate?.state]);
+  }, [gate?.state, gate?.workspace]);
   useEffect(() => {
     if (!dirty || !project || !revision) return;
     const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
@@ -71,43 +73,43 @@ export default function Builder() {
   useEffect(() => {
     if (!project || !revision) return;
     try {
-      if (dirty) localStorage.setItem(`studsmith-draft-${project.id}`, JSON.stringify({ baseRevision: revision.id, files }));
-      else localStorage.removeItem(`studsmith-draft-${project.id}`);
-    } catch { /* Saved project data is on disk; browser draft storage may be unavailable. */ }
-  }, [files, dirty, project, revision]);
+      if (dirty) localStorage.setItem(`studsmith-draft-${gate?.workspace}-${project.id}`, JSON.stringify({ baseRevision: revision.id, files }));
+      else localStorage.removeItem(`studsmith-draft-${gate?.workspace}-${project.id}`);
+    } catch { /* Saved project data is in IndexedDB; browser draft storage may be unavailable. */ }
+  }, [files, dirty, project, revision, gate?.workspace]);
 
   const acceptProject = (p: Project) => {
     setProject(p); setFiles(current(p).game.files); setSelectedFile(current(p).game.files[0]?.path || ""); setSelectedPart(null);
     history.replaceState(null, "", `/?project=${p.id}`);
   };
-  const refreshProjects = async () => { setProjects(await api<ProjectSummary[]>("/api/projects")); };
+  const refreshProjects = async () => { setProjects(await listProjects(gate!.workspace!)); };
   const receiveProject = useCallback((p: Project) => {
       acceptProject(p);
       try {
-        const draft = localStorage.getItem(`studsmith-draft-${p.id}`);
+        const draft = localStorage.getItem(`studsmith-draft-${gate?.workspace}-${p.id}`);
         if (draft) {
           const parsed = JSON.parse(draft);
           if (parsed.baseRevision === current(p).id && Array.isArray(parsed.files)) { setFiles(parsed.files); setNotice("Recovered your unsaved script edits. Save them to create a revision."); }
           else setNotice("An older browser draft exists. The project has newer saved revisions.");
         }
       } catch {
-        setNotice("Browser draft storage is unavailable. Saved project revisions are on disk.");
+        setNotice("Browser draft storage is unavailable. Saved project revisions are in browser storage.");
       }
-  }, []);
+  }, [gate?.workspace]);
   const load = useCallback(async (id: string) => {
     setLoadingProject(true); setFailure(null); setNotice("");
     try {
-      receiveProject(await api<Project>(`/api/projects/${id}`));
+      receiveProject(await loadProject(gate!.workspace!, id));
     } catch (e) { setFailure(e as Failure); }
     finally { setLoadingProject(false); }
-  }, [receiveProject]);
+  }, [receiveProject, gate]);
   const initialLoaded = useRef(false);
   useEffect(() => {
     if (gate?.state !== "ready" || initialLoaded.current) return;
     initialLoaded.current = true;
     const id = new URLSearchParams(location.search).get("project");
-    if (id) api<Project>(`/api/projects/${id}`).then(receiveProject).catch((e) => setFailure(e));
-  }, [gate?.state, receiveProject]);
+    if (id) loadProject(gate.workspace!, id).then(receiveProject).catch((e) => setFailure(e));
+  }, [gate?.state, gate?.workspace, receiveProject]);
 
   async function choose(choice: string, ownKey?: { baseURL: string; apiKey: string; model: string }) {
     setBusy("Connecting AI"); setFailure(null);
@@ -122,16 +124,17 @@ export default function Builder() {
     const controller = new AbortController(); abortRef.current = controller;
     setBusy(project ? "Updating your game…" : "Building your game…"); setFailure(null); setNotice("");
     try {
-      const p = await api<Project>(project ? `/api/projects/${project.id}/generate` : "/api/projects", { ...post({ ...(project ? { baseRevision: revision!.id } : { action: "generate" }), prompt, tier }), signal: controller.signal });
+      const built = await api<Game>("/api/generate", { ...post({ currentGame: game || null, prompt, tier }), signal: controller.signal });
+      const p = project ? await appendRevision(gate!.workspace!, project.id, revision!.id, built, prompt, "Updated game") : await createProject(gate!.workspace!, built, prompt);
       acceptProject(p); setPrompt(""); setTab("preview");
       setNotice("Project saved. Review its scripts and playtest in Studio before publishing.");
       await refreshProjects();
-    } catch (e) { setFailure(controller.signal.aborted ? { message: "Stopped waiting. Reload projects to check whether generation finished saving." } : e as Failure); }
+    } catch (e) { setFailure(controller.signal.aborted ? { message: "Generation canceled. Your saved project is unchanged." } : e as Failure); }
     finally { setBusy(""); abortRef.current = null; }
   }
   async function importGame(value: unknown) {
     setBusy("Importing project…"); setFailure(null);
-    try { acceptProject(await api<Project>("/api/projects", post({ action: "import", game: value }))); setTab("preview"); await refreshProjects(); }
+    try { acceptProject(await createProject(gate!.workspace!, value as Game, "Imported project")); setTab("preview"); await refreshProjects(); }
     catch (e) { setFailure(e as Failure); }
     finally { setBusy(""); }
   }
@@ -139,7 +142,7 @@ export default function Builder() {
     if (!project || !revision) return;
     setBusy("Saving scripts…"); setFailure(null);
     try {
-      const p = await api<Project>(`/api/projects/${project.id}`, { method: "PATCH", body: JSON.stringify({ action: "save", baseRevision: revision.id, files }) });
+      const p = await appendRevision(gate!.workspace!, project.id, revision.id, { ...game!, files }, "Manual script edits", "Saved script edits");
       setProject(p); setNotice("Scripts saved as a new revision."); await refreshProjects();
     } catch (e) { setFailure(e as Failure); }
     finally { setBusy(""); }
@@ -147,7 +150,9 @@ export default function Builder() {
   async function restore(id: string) {
     if (!project || !revision) return;
     setBusy("Restoring revision…"); setFailure(null);
-    try { acceptProject(await api<Project>(`/api/projects/${project.id}`, { method: "PATCH", body: JSON.stringify({ action: "restore", baseRevision: revision.id, revisionId: id }) })); setNotice("Restored as a new revision. Your previous versions are still in history."); await refreshProjects(); }
+    try { const target = project.revisions.find((r) => r.id === id);
+      if (!target) throw new Error("Revision not found.");
+      acceptProject(await appendRevision(gate!.workspace!, project.id, revision.id, target.game, "Restored previous revision", "Restored previous revision")); setNotice("Restored as a new revision. Your previous versions are still in history."); await refreshProjects(); }
     catch (e) { setFailure(e as Failure); }
     finally { setBusy(""); }
   }
@@ -155,9 +160,8 @@ export default function Builder() {
     if (!project || dirty) return;
     setFailure(null); setBusy("Preparing download…");
     try {
-      const response = await fetch(`/api/projects/${project.id}/export?format=${format}`);
-      if (!response.ok) throw (await response.json()).error;
-      const url = URL.createObjectURL(await response.blob());
+      const data = format === "zip" ? sourceZip(game!).slice().buffer as ArrayBuffer : format === "json" ? JSON.stringify(game, null, 2) : placeXml(game!);
+      const url = URL.createObjectURL(new Blob([data], { type: format === "zip" ? "application/zip" : format === "json" ? "application/json" : "application/xml" }));
       const a = document.createElement("a"); a.href = url; a.download = `${exportName(game!.title)}.${format}`; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
       setNotice(`Downloaded ${format === "rbxlx" ? "Studio place" : format === "zip" ? "Rojo source ZIP" : "project backup"}.`);
@@ -170,14 +174,14 @@ export default function Builder() {
     {gate?.state === "setup" && <div className="setup-note"><strong>App setup required</strong><p>This build is wired to Publik, but Studsmith needs its own app registration and public app token. Other apps’ credentials are never reused.</p><code>publik-app-token.txt</code><p>Place the token in the project folder, then retry. See README.md for the setup details.</p></div>}
     {gate?.state === "sign_in" && gate.claimUrl && <a className="button primary full" href={gate.claimUrl} target="_blank" rel="noreferrer">Sign in with publik ↗</a>}
     {gate?.state === "choose" && <div className="gate-actions">{gate.hasPlan ? <button className="primary" disabled={!!busy} onClick={() => void choose("publik")}>Connect your plan</button> : gate.topUpUrl && <a className="button primary" href={gate.topUpUrl} target="_blank" rel="noreferrer">Get a plan ↗</a>}<button onClick={() => setOwnForm(!ownForm)}>Use my own key</button></div>}
-    {ownForm && <form className="own-form" onSubmit={(event) => { event.preventDefault(); const values = new FormData(event.currentTarget); void choose("own_key", { baseURL: String(values.get("url")), apiKey: String(values.get("key")), model: String(values.get("model")) }); }}><label>OpenAI-compatible base URL<input name="url" type="url" defaultValue="https://api.openai.com/v1" required /></label><label>Model<input name="model" placeholder="Your provider’s model name" required maxLength={120} /></label><label>API key<input name="key" type="password" autoComplete="off" required /></label><p className="muted">Stored on this computer. Sent only to your chosen provider.</p><button className="primary" disabled={!!busy}>Save provider</button></form>}
-    {gate && <button className="text-button retry" onClick={() => void refreshGate()}>Retry connection</button>}<p className="gate-footer">Your projects stay on this computer. Prompts and code go to your chosen AI provider. Publik counts app usage without project content; set DO_NOT_TRACK=1 to opt out.</p></div></main>;
+    {ownForm && <form className="own-form" onSubmit={(event) => { event.preventDefault(); const values = new FormData(event.currentTarget); void choose("own_key", { baseURL: String(values.get("url")), apiKey: String(values.get("key")), model: String(values.get("model")) }); }}><label>OpenAI-compatible base URL<input name="url" type="url" defaultValue="https://api.openai.com/v1" required /></label><label>Model<input name="model" placeholder="Your provider’s model name" required maxLength={120} /></label><label>API key<input name="key" type="password" autoComplete="off" required /></label><p className="muted">Stored in an encrypted, HttpOnly session cookie. Sent only to your chosen provider.</p><button className="primary" disabled={!!busy}>Save provider</button></form>}
+    {gate && <button className="text-button retry" onClick={() => void refreshGate()}>Retry connection</button>}<p className="gate-footer">Projects save in this browser. Export a backup to move them between devices. Prompts and code go to your chosen AI provider. Publik counts app usage without project content; set DO_NOT_TRACK=1 to opt out.</p></div></main>;
 
   const activePart = game?.parts.find((p) => p.id === selectedPart);
   const activeFile = files.find((f) => f.path === selectedFile);
   return <div className="app-shell">
-    <aside className="sidebar"><Logo /><button className="new-project" disabled={locked} onClick={() => { setProject(null); setFiles([]); setPrompt(""); setFailure(null); setNotice(""); history.replaceState(null, "", "/"); }}>＋ New game</button><div className="sidebar-heading">YOUR PROJECTS <span>{projects.length}</span></div><nav aria-label="Projects">{projects.length === 0 && <p className="sidebar-empty">Your first world starts with an idea.</p>}{projects.map((p) => <button className={`project-link ${p.id === project?.id ? "active" : ""}`} key={p.id} disabled={locked} onClick={() => void load(p.id)}><span className="project-icon" aria-hidden="true">◇</span><span><strong>{p.title}</strong><small>{p.revisionCount} revision{p.revisionCount === 1 ? "" : "s"}</small></span></button>)}</nav><div className="sidebar-bottom"><input hidden type="file" accept=".json,application/json" ref={importInput} onChange={async (event) => { const file = event.target.files?.[0]; event.target.value = ""; if (!file) return; if (file.size > 3 * 1024 * 1024) { setFailure({ message: "Choose a Studsmith JSON backup smaller than 3 MB." }); return; } try { await importGame(JSON.parse(await file.text())); } catch { setFailure({ message: "That isn't a valid JSON backup. Export a project backup from Studsmith first." }); } }} /><button disabled={locked} onClick={() => importInput.current?.click()}>↥ Import project</button><button disabled={locked} onClick={async () => { setFailure(null); try { setGate(await api<Gate>("/api/publik", post({ action: "settings" }))); } catch (e) { setFailure(e as Failure); } }}>AI settings <span>↗</span></button><div className="account"><span className="account-dot" />{gate.handle ? `@${gate.handle}` : "Connected to Publik"}<small>{gate.provider === "own_key" ? "Own provider" : "Publik connected"}</small></div></div></aside>
-    <main className="main-workspace"><header className="topbar"><div><span className="breadcrumb">Workspace</span><span className="separator">/</span><strong>{game?.title || "New game"}</strong>{dirty && <span className="unsaved">Unsaved edits</span>}</div><span className="local-label"><span /> Saved locally</span></header>
+    <aside className="sidebar"><Logo /><button className="new-project" disabled={locked} onClick={() => { setProject(null); setFiles([]); setPrompt(""); setFailure(null); setNotice(""); history.replaceState(null, "", "/"); }}>＋ New game</button><div className="sidebar-heading">YOUR PROJECTS <span>{projects.length}</span></div><nav aria-label="Projects">{projects.length === 0 && <p className="sidebar-empty">Your first world starts with an idea.</p>}{projects.map((p) => <button className={`project-link ${p.id === project?.id ? "active" : ""}`} key={p.id} disabled={locked} onClick={() => void load(p.id)}><span className="project-icon" aria-hidden="true">◇</span><span><strong>{p.title}</strong><small>{p.revisionCount} revision{p.revisionCount === 1 ? "" : "s"}</small></span></button>)}</nav><div className="sidebar-bottom"><input hidden type="file" accept=".json,application/json" ref={importInput} onChange={async (event) => { const file = event.target.files?.[0]; event.target.value = ""; if (!file) return; if (file.size > 3 * 1024 * 1024) { setFailure({ message: "Choose a Studsmith JSON backup smaller than 3 MB." }); return; } try { await importGame(JSON.parse(await file.text())); } catch { setFailure({ message: "That isn't a valid JSON backup. Export a project backup from Studsmith first." }); } }} /><button disabled={locked} onClick={() => importInput.current?.click()}>↥ Import project</button><button disabled={locked} onClick={async () => { setFailure(null); try { setGate(await api<Gate>("/api/publik", post({ action: "settings" }))); } catch (e) { setFailure(e as Failure); } }}>AI settings <span>↗</span></button><button disabled={locked} onClick={async () => { try { await api("/api/publik", post({ action: "sign_out" })); setProject(null); setFiles([]); setProjects([]); setPrompt(""); setNotice(""); initialLoaded.current = false; history.replaceState(null, "", "/"); await refreshGate(); } catch (e) { setFailure(e as Failure); } }}>Sign out</button><div className="account"><span className="account-dot" />{gate.handle ? `@${gate.handle}` : "Connected to Publik"}<small>{gate.provider === "own_key" ? "Own provider" : "Publik connected"}</small></div></div></aside>
+    <main className="main-workspace"><header className="topbar"><div><span className="breadcrumb">Workspace</span><span className="separator">/</span><strong>{game?.title || "New game"}</strong>{dirty && <span className="unsaved">Unsaved edits</span>}</div><span className="local-label"><span /> Saved in browser</span></header>
       <div className="messages">{gate.testMode && <div className="notice">Local test mode: AI responses use a fixture. No live Publik account is connected.</div>}{errorBox}{notice && <div className="notice" role="status">{notice}<button className="text-button" aria-label="Dismiss notice" onClick={() => setNotice("")}>×</button></div>}{dirty && <div className="draft-banner"><span>Save your script edits before generating, exporting, or switching projects.</span><button disabled={!!busy} onClick={() => void save()}>Save edits</button><button disabled={!!busy} onClick={() => setFiles(game!.files)}>Discard edits</button></div>}</div>
       {loadingProject ? <div className="empty-state" role="status">Opening project…</div> : !game ? <section className="welcome"><div className="welcome-icon" aria-hidden="true">▱</div><span className="eyebrow">YOUR NEXT GAME STARTS HERE</span><h1>Imagine it.<br /><span>Build it in studs.</span></h1><p>Describe a world, its rules, and what makes it fun.<br />Get real Luau scripts and a place you can open in Studio.</p><div className="starter-list">{STARTER_PROMPTS.map((s, i) => <button disabled={!!busy} key={s.title} onClick={() => { setPrompt(s.prompt); promptInput.current?.focus(); }}><span className="starter-number">0{i + 1}</span><span>{s.title}</span><span aria-hidden="true">↗</span></button>)}</div></section> : <section className="project-workspace"><div className="project-heading"><div><span className="eyebrow">{game.parts.length} PARTS · {game.files.length} SCRIPTS · REVISION {project!.revisions.length}</span><h1>{game.title}</h1><p>{game.description}</p></div><button className="primary" disabled={locked} onClick={() => setTab("export")}>Export to Studio ↗</button></div><nav className="tabs" aria-label="Project views">{([ ["preview", "Scene"], ["code", "Scripts"], ["guide", "Play & test"], ["plan", "Game plan"], ["history", "History"], ["export", "Export"] ] as [Tab, string][]).map(([value, label]) => <button key={value} aria-current={tab === value ? "page" : undefined} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>{label}</button>)}</nav>
         {tab === "preview" && <div className="preview-layout"><div className="preview-main"><div className="preview-label"><span className="status-dot" />Static scene preview<span>Play scripts in Roblox Studio</span></div><Scene game={game} selected={selectedPart} onSelect={setSelectedPart} /></div><aside className="inspector"><h2>World <span>{game.parts.length}</span></h2><div className="part-list">{game.parts.map((p) => <button key={p.id} className={selectedPart === p.id ? "selected" : ""} onClick={() => setSelectedPart(p.id)}><span className="part-swatch" style={{ background: p.color }} />{p.name}<small>{p.kind}</small></button>)}</div>{activePart && <div className="part-details"><h3>{activePart.name}</h3><dl><dt>Position</dt><dd>{activePart.position.join(", ")}</dd><dt>Size</dt><dd>{activePart.size.join(" × ")}</dd><dt>Material</dt><dd>{activePart.material}</dd><dt>Anchored</dt><dd>{activePart.anchored ? "Yes" : "No"}</dd></dl></div>}</aside></div>}
@@ -187,7 +191,7 @@ export default function Builder() {
         {tab === "history" && <div className="history-list">{[...project!.revisions].reverse().map((r, i) => <article key={r.id}><div className="revision-number">{String(project!.revisions.length - i).padStart(2, "0")}</div><div><h2>{r.summary}</h2><p>{r.prompt}</p><small>{new Date(r.createdAt).toLocaleString()}</small></div>{i === 0 ? <span className="current-revision">Current</span> : <button disabled={locked} onClick={() => void restore(r.id)}>Restore</button>}</article>)}</div>}
         {tab === "export" && <div className="export-panel"><div><span className="eyebrow">TAKE YOUR GAME WITH YOU</span><h2>From here to Studio.</h2><p>Your world and scripts travel together. No plugin required.</p><ol className="export-steps"><li><strong>Download your place</strong><p>A .rbxlx file containing the map, server scripts, client scripts, and shared modules.</p></li><li><strong>Open it in Roblox Studio</strong><p>Choose File → Open from File and select the downloaded .rbxlx.</p></li><li><strong>Press Play and test</strong><p>Follow the Play & test checklist. Review scripts before publishing to Roblox.</p></li></ol><button className="primary export-primary" disabled={locked} onClick={() => void download("rbxlx")}>↓ Download Studio place</button></div><aside className="export-extras"><h3>Keep building</h3><p>Prefer files and live sync? The source ZIP includes every script, the world model, a Rojo project, and setup instructions.</p><button disabled={locked} onClick={() => void download("zip")}>↓ Download Rojo source ZIP</button><hr /><h3>Back up your project</h3><p>Import this JSON file into Studsmith to keep editing on another computer. Contains the current game, without revision history.</p><button disabled={locked} onClick={() => void download("json")}>↓ Download project backup</button></aside></div>}
       </section>}
-      <div className={`composer-wrap ${!game ? "composer-home" : ""}`}><form className="composer" onSubmit={generate}><label htmlFor="game-prompt">{game ? "What should we change?" : "Describe your game"}</label><textarea ref={promptInput} id="game-prompt" placeholder={game ? "Add moving platforms, a shop, a new level…" : "A floating-island obstacle course with checkpoints and a race timer…"} value={prompt} maxLength={12000} rows={3} disabled={!!busy || loadingProject} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><div className="composer-bottom"><div><label className="sr-only" htmlFor="ai-tier">AI model tier</label><select id="ai-tier" value={tier} disabled={!!busy} onChange={(event) => setTier(event.target.value)}><option value="publik-smart">Publik Smart</option><option value="publik-balanced">Publik Balanced</option></select><span className="composer-hint">3–5 AI calls per build · {gate.provider === "own_key" ? "Your provider" : "Publik balance"}</span></div><button className="primary" type="submit" disabled={!!busy || loadingProject || dirty}>{busy ? busy : game ? "Build changes ↑" : "Build game ↑"}</button></div>{busy.includes("game") && <div className="generation-status" role="status"><span className="working-dot" />Designing, building, and reviewing your game. Allow up to 6 minutes.<button className="text-button" type="button" onClick={() => abortRef.current?.abort()}>Stop waiting</button></div>}</form><p className="composer-footnote">{dirty ? "Save edits before building changes." : "⌘ / Ctrl + Enter to build"}<span>Made for Roblox · Built with Publik</span></p></div>
+      <div className={`composer-wrap ${!game ? "composer-home" : ""}`}><form className="composer" onSubmit={generate}><label htmlFor="game-prompt">{game ? "What should we change?" : "Describe your game"}</label><textarea ref={promptInput} id="game-prompt" placeholder={game ? "Add moving platforms, a shop, a new level…" : "A floating-island obstacle course with checkpoints and a race timer…"} value={prompt} maxLength={12000} rows={3} disabled={!!busy || loadingProject} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><div className="composer-bottom"><div><label className="sr-only" htmlFor="ai-tier">AI model tier</label><select id="ai-tier" value={tier} disabled={!!busy} onChange={(event) => setTier(event.target.value)}><option value="publik-smart">Publik Smart</option><option value="publik-balanced">Publik Balanced</option></select><span className="composer-hint">3–5 AI calls per build · {gate.provider === "own_key" ? "Your provider" : "Publik balance"}</span></div><button className="primary" type="submit" disabled={!!busy || loadingProject || dirty}>{busy ? busy : game ? "Build changes ↑" : "Build game ↑"}</button></div>{busy.includes("game") && <div className="generation-status" role="status"><span className="working-dot" />Designing, building, and reviewing your game. Allow up to 5 minutes.<button className="text-button" type="button" onClick={() => abortRef.current?.abort()}>Stop waiting</button></div>}</form><p className="composer-footnote">{dirty ? "Save edits before building changes." : "⌘ / Ctrl + Enter to build"}<span>Made for Roblox · Built with Publik</span></p></div>
     </main>
   </div>;
 }

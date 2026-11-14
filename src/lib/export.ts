@@ -1,5 +1,5 @@
 import { strToU8, zipSync } from "fflate";
-import { exportName, GameSchema, type Game, type GameFile, type Part } from "../project";
+import { exportName, GameSchema, type Game, type GameFile, type Part } from "./project";
 
 const xml = (value: unknown) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 const prop = (type: string, name: string, value: unknown) => `<${type} name="${name}">${xml(value)}</${type}>`;

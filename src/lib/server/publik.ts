@@ -97,7 +97,7 @@ function isOffline(e: unknown): boolean {
 }
 
 /** POST /api/v1/installs: a publik key for one browser session. Throws a readable message. */
-export async function provision(opts: { installId?: string; priorKey?: string | null } = {}): Promise<Installed> {
+export async function provision(opts: { installId?: string; priorKey?: string | null; persist?: boolean } = {}): Promise<Installed> {
   const token = appToken();
   if (!token.startsWith("pat_")) throw new Error("This build has no publik app token. Ask the developer for a new build.");
   let installId = opts.installId ?? randomUUID();
@@ -121,7 +121,7 @@ export async function provision(opts: { installId?: string; priorKey?: string | 
     const key: string | null = body.key ?? (res.status === 200 ? opts.priorKey ?? null : null);
     if ((res.status === 201 || res.status === 200) && key) {
       const c = { key, base_url: body.base_url ?? DEFAULT_BASE_URL, install_id: body.install_id ?? installId, claim_url: body.claim_url ?? null };
-      writeCredential(c); // the key reaches disk before anything else sees it
+      if (opts.persist !== false) writeCredential(c);
       return c;
     }
     if (res.status === 200 || body.error?.type === "install_revoked") { installId = randomUUID(); continue; }
@@ -187,10 +187,10 @@ function telemetryInstallId(): string {
 }
 
 /** POST /api/v1/telemetry with the install key and no content. Never throws. */
-export async function sendEvent(event: "app_opened" | "active_session", s: { key: string }): Promise<number | null> {
+export async function sendEvent(event: "app_opened" | "active_session", s: { key: string; installId?: string }): Promise<number | null> {
   if (usageOff()) return null;
   try {
-    const body = { v: 1, app: APP_SLUG, install_id: telemetryInstallId(), event, app_version: APP_VERSION.replace(/^v/i, ""), os: OS, ...ARCH };
+    const body = { v: 1, app: APP_SLUG, install_id: s.installId || telemetryInstallId(), event, app_version: APP_VERSION.replace(/^v/i, ""), os: OS, ...ARCH };
     const res = await fetch(process.env.PUBLIK_TELEMETRY_URL || `${ORIGIN}/api/v1/telemetry`, {
       method: "POST", signal: AbortSignal.timeout(5_000),
       headers: { "content-type": "application/json", ...(s.key.startsWith("pk_") ? { authorization: `Bearer ${s.key}` } : {}) },
