@@ -1,6 +1,10 @@
+<img src="docs/img/logo.png" alt="Studsmith" width="96" height="96" />
+
 # Studsmith
 
 Describe a Roblox game, refine its world and Luau scripts, and export a place that opens directly in Roblox Studio.
+
+![Studsmith workspace showing Lantern Run, a 77-part lantern-lit village, in the 3D scene preview with the part inspector open on the clock tower spire](docs/img/hero.png)
 
 Studsmith is not affiliated with or endorsed by Roblox Corporation. Roblox is a trademark of Roblox Corporation.
 
@@ -10,10 +14,18 @@ Studsmith is an open-source browser app built with Publik. Try the [hosted build
 
 1. Sign in with Publik and connect your plan, or choose your own compatible provider. A build uses about $1 of AI usage (observed $0.45–$1.60 on `publik-smart`), so the $0.05 of free use on a new Publik account is not enough; the gate says so and offers a plan or your own OpenAI key instead.
 2. Describe the game. The AI designs it, builds the map and scripts, reviews the result, and repairs major findings before saving. Progress streams stage by stage; a build usually takes 4–8 minutes. Keep the tab open: leaving or reloading stops the build, and AI usage already spent is not refunded.
+
+   ![The new-game screen with a cozy delivery game typed into the Describe your game box, the model tier picker and the Build game button](docs/img/02-describe.jpg)
+
 3. Inspect the scene, edit scripts, and read the Game plan and Play & test notes.
+
+   ![The Scripts tab showing Lantern Run's 289-line GameServer.server.luau with the client script listed beside it](docs/img/03-scripts.jpg)
+
 4. Download the Studio place. In Roblox Studio choose **File → Open from File**, select the `.rbxlx`, then press **Play**.
 
 Before sign-in, the gate shows Lantern Run (`src/lib/examples/lantern-run.json`), a real 77-part game Studsmith generated, in the same 3D preview, and lets anyone download it as a Studio place.
+
+![The sign-in page: Describe a game. Open it in Roblox Studio., a Sign in with Publik button, and the Lantern Run example turning in a 3D preview with a Download it for Studio link](docs/img/05-example.jpg)
 
 If a build fails after producing a valid game (the AI check still has major findings after the last repair, the time budget runs out, or the provider returns an error such as a 402), Studsmith saves that last valid game as a draft labelled **Needs review — failed AI check**, with the reviewer's findings in Build notes, instead of discarding work the visitor paid for.
 
@@ -42,6 +54,8 @@ Prompts and current project source go to the selected AI provider. Publik receiv
 The hosted own-key option supports `https://api.openai.com/v1`. Source installs can use other OpenAI-compatible HTTPS providers or a provider on loopback. Hosted requests cannot proxy to arbitrary internal destinations, and provider redirects are rejected.
 
 ## Exports
+
+![The Export tab: three steps from download to pressing Play, a Download Studio place button, and Rojo source ZIP and project backup downloads](docs/img/04-export.jpg)
 
 - **Studio place**: the map and scripts in one `.rbxlx`, no plugin required.
 - **Rojo source ZIP**: the place, `world.rbxmx`, `default.project.json`, `src/`, game instructions, and `studsmith.json`.
