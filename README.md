@@ -1,10 +1,10 @@
+![Studsmith workspace showing Lantern Run, a 77-part lantern-lit village, in the 3D scene preview with the part inspector open on the clock tower spire](docs/img/hero.png)
+
 <img src="docs/img/logo.png" alt="Studsmith" width="96" height="96" />
 
 # Studsmith
 
 Describe a Roblox game, refine its world and Luau scripts, and export a place that opens directly in Roblox Studio.
-
-![Studsmith workspace showing Lantern Run, a 77-part lantern-lit village, in the 3D scene preview with the part inspector open on the clock tower spire](docs/img/hero.png)
 
 Studsmith is not affiliated with or endorsed by Roblox Corporation. Roblox is a trademark of Roblox Corporation.
 
